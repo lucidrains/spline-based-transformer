@@ -1,5 +1,5 @@
 import torch
-from torch import nn
+from torch import nn, tensor
 import torch.nn.functional as F
 from torch.nn import Module, ModuleList
 
@@ -28,6 +28,39 @@ def pack_with_inverse(t, pattern):
 
     return t, inverse
 
+# uniform cubic b-spline
+
+class BSpline(Module):
+    def __init__(self):
+        super().__init__()
+
+        matrix = tensor([
+            [-1,  3, -3,  1],
+            [ 3, -6,  3,  0],
+            [-3,  0,  3,  0],
+            [ 1,  4,  1,  0]
+        ]) / 6
+
+        self.register_buffer('matrix', matrix)
+
+    def forward(
+        self,
+        control_points,
+        times
+    ):
+        batch, device = control_points.shape[0], control_points.device
+        assert control_points.shape[1] == 4
+
+        # just following the many b-spline equations i see online
+        # open an issue if you see some obvious error
+
+        powers = torch.arange(4, device = device)
+
+        times = rearrange(times, 't -> t 1') ** powers
+        times = repeat(times, '... -> b ...', b = batch)
+
+        return times @ self.matrix @ control_points
+
 # class
 
 class SplineBasedTransformer(Module):
@@ -45,6 +78,8 @@ class SplineBasedTransformer(Module):
         dec_depth = default(dec_depth, enc_depth)
 
         self.control_point_latents = nn.Parameter(torch.zeros(num_control_points, dim))
+
+        self.bspliner = BSpline()
 
         self.encoder = Encoder(
             dim = dim,
@@ -69,7 +104,7 @@ class SplineBasedTransformer(Module):
         data,
         return_loss = False
     ):
-        batch = data.shape[0]
+        batch, num_points, device = *data.shape[:2], data.device
 
         latents = repeat(self.control_point_latents, 'l d -> b l d', b = batch)
 
@@ -77,9 +112,15 @@ class SplineBasedTransformer(Module):
 
         encoded = self.encoder(encoder_input)
 
-        latents, encoded = unpack_fn(encoded)
+        control_latents, encoded = unpack_fn(encoded)
 
-        recon = self.decoder(encoded)
+        # uniform times from 0 - 1
+
+        times = torch.linspace(0, 1, num_points, device = device)
+
+        splined_from_latent_controls = self.bspliner(control_latents, times)
+
+        recon = self.decoder(splined_from_latent_controls)
 
         if not return_loss:
             return recon
