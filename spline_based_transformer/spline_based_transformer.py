@@ -99,10 +99,27 @@ class SplineBasedTransformer(Module):
             ff_dropout = dropout
         )
 
+    def decode_from_latents(
+        self,
+        control_points,
+        num_times: int
+    ):
+        device = control_points.device
+
+        # uniform times from 0 - 1
+
+        times = torch.linspace(0, 1, num_times, device = device)
+
+        splined_from_latent_controls = self.bspliner(control_points, times)
+
+        recon = self.decoder(splined_from_latent_controls)
+        return recon
+
     def forward(
         self,
         data,
-        return_loss = False
+        return_loss = False,
+        return_latents = False
     ):
         batch, num_points, device = *data.shape[:2], data.device
 
@@ -114,16 +131,13 @@ class SplineBasedTransformer(Module):
 
         control_latents, encoded = unpack_fn(encoded)
 
-        # uniform times from 0 - 1
-
-        times = torch.linspace(0, 1, num_points, device = device)
-
-        splined_from_latent_controls = self.bspliner(control_latents, times)
-
-        recon = self.decoder(splined_from_latent_controls)
+        recon = self.decode_from_latents(control_latents, num_times = num_points)
 
         if not return_loss:
-            return recon
+            if not return_latents:
+                return recon
+
+            return recon, control_latents
 
         recon_loss = F.mse_loss(recon, data)
         return recon_loss

@@ -29,8 +29,17 @@ data = torch.randn(1, 1024, 512)
 loss = model(data, return_loss = True)
 loss.backward()
 
-recon = model(data)
+# after much training
+
+recon, control_points = model(data, return_latents = True)
 assert data.shape == recon.shape
+
+# mess with the control points, which should preserve continuity better
+
+control_points += 1
+
+controlled_recon = model.decode_from_latents(control_points, num_times = 1024)
+assert controlled_recon.shape == data.shape
 ```
 
 ## Citations
