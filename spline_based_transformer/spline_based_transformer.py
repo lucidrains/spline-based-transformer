@@ -5,11 +5,7 @@ from torch.nn import Module, ModuleList
 
 from einops import rearrange, repeat, pack, unpack
 
-from x_transformers import (
-    Encoder,
-    RMSNorm,
-    FeedForward
-)
+from x_transformers import Encoder
 
 # helpers
 
@@ -27,6 +23,18 @@ def pack_with_inverse(t, pattern):
         return unpack(t, packed_shape, inverse_pattern)
 
     return t, inverse
+
+# a simple mlp for encoding data and decoding
+
+def MLP(dim, dim_out = None, expand_factor = 2):
+    dim_out = default(dim_out, dim)
+    dim_inner = dim_out * expand_factor
+
+    return nn.Sequential(
+        nn.Linear(dim, dim_inner),
+        nn.GELU(),
+        nn.Linear(dim_inner, dim_out)
+    )
 
 # uniform cubic b-spline
 
@@ -68,6 +76,7 @@ class SplineBasedTransformer(Module):
         self,
         dim,
         enc_depth,
+        model_dim = None,
         dec_depth = None,
         dim_head = 64,
         heads = 8,
@@ -75,11 +84,14 @@ class SplineBasedTransformer(Module):
         num_control_points = 4
     ):
         super().__init__()
+        model_dim = default(model_dim, dim)
         dec_depth = default(dec_depth, enc_depth)
 
         self.control_point_latents = nn.Parameter(torch.zeros(num_control_points, dim))
 
         self.bspliner = BSpline()
+
+        self.mlp_in = MLP(dim, model_dim)
 
         self.encoder = Encoder(
             dim = dim,
@@ -99,6 +111,8 @@ class SplineBasedTransformer(Module):
             ff_dropout = dropout
         )
 
+        self.mlp_out = MLP(model_dim, dim)
+
     def decode_from_latents(
         self,
         control_points,
@@ -112,7 +126,9 @@ class SplineBasedTransformer(Module):
 
         splined_from_latent_controls = self.bspliner(control_points, times)
 
-        recon = self.decoder(splined_from_latent_controls)
+        decoded = self.decoder(splined_from_latent_controls)
+
+        recon = self.mlp_out(decoded)
         return recon
 
     def forward(
@@ -122,6 +138,8 @@ class SplineBasedTransformer(Module):
         return_latents = False
     ):
         batch, num_points, device = *data.shape[:2], data.device
+
+        data = self.mlp_in(data)
 
         latents = repeat(self.control_point_latents, 'l d -> b l d', b = batch)
 
