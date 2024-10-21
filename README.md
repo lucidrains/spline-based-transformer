@@ -2,7 +2,7 @@
 
 ## Spline-Based Transformer (wip)
 
-Implementation of the proposed <a href="https://www.youtube.com/watch?v=AzolLlIbKhg">Spline-Based Transformer</a> from Disney Research
+Implementation of the proposed <a href="https://www.youtube.com/watch?v=AzolLlIbKhg">Spline-Based Transformer</a> ([paper](https://la.disneyresearch.com/wp-content/uploads/SBT.pdf)) from Disney Research
 
 This is basically a transformer based autoencoder, but they cleverly use a set of latent tokens, where that set of tokens are the (high dimensional) control points for a spline.
 
