@@ -1,5 +1,5 @@
 import torch
-from torch import nn, tensor
+from torch import nn, Tensor, tensor
 import torch.nn.functional as F
 from torch.nn import Module, ModuleList
 
@@ -53,11 +53,15 @@ class BSpline(Module):
 
     def forward(
         self,
-        control_points,
-        times
+        control_points: Tensor,
+        num_times: int
     ):
         batch, device = control_points.shape[0], control_points.device
         assert control_points.shape[1] == 4
+
+        # uniform times from 0 - 1
+
+        times = torch.linspace(0, 1, num_times, device = device)
 
         # just following the many b-spline equations i see online
         # open an issue if you see some obvious error
@@ -115,16 +119,12 @@ class SplineBasedTransformer(Module):
 
     def decode_from_latents(
         self,
-        control_points,
+        control_points: Tensor,
         num_times: int
     ):
         device = control_points.device
 
-        # uniform times from 0 - 1
-
-        times = torch.linspace(0, 1, num_times, device = device)
-
-        splined_from_latent_controls = self.bspliner(control_points, times)
+        splined_from_latent_controls = self.bspliner(control_points, num_times)
 
         decoded = self.decoder(splined_from_latent_controls)
 
@@ -133,7 +133,7 @@ class SplineBasedTransformer(Module):
 
     def forward(
         self,
-        data,
+        data: Tensor,
         return_loss = False,
         return_latents = False
     ):
