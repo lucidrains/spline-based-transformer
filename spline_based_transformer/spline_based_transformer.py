@@ -64,10 +64,10 @@ class BSpline(Module):
 
         times = torch.linspace(0, 1, num_times, device = device)
 
-        # just following the many b-spline equations i see online
+        # following https://en.wikipedia.org/wiki/B-spline
         # open an issue if you see some obvious error
 
-        powers = torch.arange(4, device = device)
+        powers = torch.arange(4, device = device).flip(dims = (0,))
 
         times = repeat(times, 't -> b t 1', b = batch) ** powers
 
