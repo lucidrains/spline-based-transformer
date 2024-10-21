@@ -6,6 +6,7 @@ from torch.nn import Module, ModuleList
 from einops import rearrange, repeat, pack, unpack
 
 from x_transformers import Encoder
+from x_transformers.x_transformers import AlibiPositionalBias
 
 # helpers
 
@@ -85,17 +86,22 @@ class SplineBasedTransformer(Module):
         dim_head = 64,
         heads = 8,
         dropout = 0.,
-        num_control_points = 4
+        num_control_points = 4,
+        encoder_kwargs: dict = dict(),
+        decoder_kwargs: dict = dict(),
     ):
         super().__init__()
         model_dim = default(model_dim, dim)
         dec_depth = default(dec_depth, enc_depth)
 
+        self.num_control_points = num_control_points
         self.control_point_latents = nn.Parameter(torch.zeros(num_control_points, dim))
 
         self.bspliner = BSpline()
 
         self.mlp_in = MLP(dim, model_dim)
+
+        self.alibi = AlibiPositionalBias(heads) # todo - figure out if the paper accounted for asymmetric slopes given alibi weakness in non-causal setting
 
         self.encoder = Encoder(
             dim = dim,
@@ -103,7 +109,8 @@ class SplineBasedTransformer(Module):
             depth = enc_depth,
             attn_dim_head = dim_head,
             attn_dropout = dropout,
-            ff_dropout = dropout
+            ff_dropout = dropout,
+            **encoder_kwargs
         )
 
         self.decoder = Encoder(
@@ -112,7 +119,8 @@ class SplineBasedTransformer(Module):
             depth = dec_depth,
             attn_dim_head = dim_head,
             attn_dropout = dropout,
-            ff_dropout = dropout
+            ff_dropout = dropout,
+            **decoder_kwargs
         )
 
         self.mlp_out = MLP(model_dim, dim)
@@ -120,13 +128,17 @@ class SplineBasedTransformer(Module):
     def decode_from_latents(
         self,
         control_points: Tensor,
-        num_times: int
+        num_times: int,
+        attn_bias = None
     ):
         device = control_points.device
 
         splined_from_latent_controls = self.bspliner(control_points, num_times)
 
-        decoded = self.decoder(splined_from_latent_controls)
+        if not exists(attn_bias):
+            attn_bias = self.alibi(num_times, num_times)
+
+        decoded = self.decoder(splined_from_latent_controls, attn_bias = attn_bias)
 
         recon = self.mlp_out(decoded)
         return recon
@@ -141,15 +153,28 @@ class SplineBasedTransformer(Module):
 
         data = self.mlp_in(data)
 
+        # prepare control point latents across all batch samples
+
         latents = repeat(self.control_point_latents, 'l d -> b l d', b = batch)
 
         encoder_input, unpack_fn = pack_with_inverse([latents, data], 'b * d')
 
-        encoded = self.encoder(encoder_input)
+        # prepare alibi attention bias, but encoder is a bit different, as there should be no relative distance to the control latents
+
+        attn_bias = self.alibi(num_points, num_points)
+        encoder_attn_bias = F.pad(attn_bias, (self.num_control_points, 0, self.num_control_points, 0), value = 0.) # there is no relative distance between the latents and all the data points
+
+        # encode
+
+        encoded = self.encoder(encoder_input, attn_bias = encoder_attn_bias)
+
+        # splice out control latents
 
         control_latents, encoded = unpack_fn(encoded)
 
-        recon = self.decode_from_latents(control_latents, num_times = num_points)
+        # reconstruct data from the bottleneck
+
+        recon = self.decode_from_latents(control_latents, num_times = num_points, attn_bias = attn_bias)
 
         if not return_loss:
             if not return_latents:

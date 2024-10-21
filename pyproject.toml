@@ -1,6 +1,6 @@
 [project]
 name = "spline-based-transformer"
-version = "0.0.4"
+version = "0.0.5"
 description = "Spline Based Transformer"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
@@ -27,7 +27,7 @@ classifiers=[
 dependencies = [
     'einops>=0.8.0',
     'torch>=2.2',    
-    'x-transformers',
+    'x-transformers>=1.40.3',
 ]
 
 [project.urls]
