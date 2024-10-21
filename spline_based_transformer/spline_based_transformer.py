@@ -69,8 +69,7 @@ class BSpline(Module):
 
         powers = torch.arange(4, device = device)
 
-        times = rearrange(times, 't -> t 1') ** powers
-        times = repeat(times, '... -> b ...', b = batch)
+        times = repeat(times, 't -> b t 1', b = batch) ** powers
 
         return times @ self.matrix @ control_points
 
