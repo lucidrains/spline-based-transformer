@@ -112,6 +112,8 @@ class SplineBasedTransformer(Module):
             **encoder_kwargs
         )
 
+        self.to_control_points = nn.Linear(dim, dim)
+
         self.decoder = Encoder(
             dim = dim,
             heads = heads,
@@ -169,17 +171,19 @@ class SplineBasedTransformer(Module):
 
         # splice out control latents
 
-        control_latents, encoded = unpack_fn(encoded)
+        latents, encoded = unpack_fn(encoded)
+
+        control_points = self.to_control_points(latents)
 
         # reconstruct data from the bottleneck
 
-        recon = self.decode_from_latents(control_latents, num_times = num_points, attn_bias = attn_bias)
+        recon = self.decode_from_latents(control_points, num_times = num_points, attn_bias = attn_bias)
 
         if not return_loss:
             if not return_latents:
                 return recon
 
-            return recon, control_latents
+            return recon, control_points
 
         recon_loss = F.mse_loss(recon, data)
         return recon_loss
