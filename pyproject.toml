@@ -1,0 +1,36 @@
+[project]
+name = "spline-based-transformer"
+version = "0.0.1"
+description = "Spline Based Transformer"
+authors = [
+    { name = "Phil Wang", email = "lucidrains@gmail.com" }
+]
+readme = "README.md"
+requires-python = ">= 3.8"
+license = { file = "LICENSE" }
+keywords = [
+    'artificial intelligence',
+    'deep learning',
+    'transformers',
+    'attention mechanism',
+    'b-spline',
+    'latent trajectories'
+  ]
+classifiers=[
+    'Development Status :: 4 - Beta',
+    'Intended Audience :: Developers',
+    'Topic :: Scientific/Engineering :: Artificial Intelligence',
+    'License :: OSI Approved :: MIT License',
+    'Programming Language :: Python :: 3.8',
+  ]
+
+dependencies = [
+    'einops>=0.8.0',
+    'rotary-embedding-torch>=0.5.3',
+    'x-transformers',
+    'torch>=2.2',    
+]
+
+[project.urls]
+Homepage = "https://pypi.org/project/spline-based-transformer"
+Repository = "https://github.com/lucidrains/spline-based-transformer"
