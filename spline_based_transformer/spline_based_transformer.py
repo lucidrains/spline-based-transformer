@@ -40,7 +40,10 @@ def MLP(dim, dim_out = None, expand_factor = 2):
 # uniform cubic b-spline
 
 class BSpline(Module):
-    def __init__(self):
+    def __init__(
+        self,
+        learned = False
+    ):
         super().__init__()
 
         matrix = tensor([
@@ -50,7 +53,7 @@ class BSpline(Module):
             [ 1,  4,  1,  0]
         ]) / 6
 
-        self.register_buffer('matrix', matrix)
+        self.coeff = nn.Parameter(matrix, requires_grad = learned)
 
     def forward(
         self,
@@ -71,7 +74,7 @@ class BSpline(Module):
 
         times = repeat(times, 't -> b t 1', b = batch) ** powers
 
-        return times @ self.matrix @ control_points
+        return times @ self.coeff @ control_points
 
 # class
 
