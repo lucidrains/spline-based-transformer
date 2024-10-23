@@ -66,7 +66,7 @@ class BSpline(Module):
     def forward(
         self,
         control_points: Tensor,
-        num_times: int | None = None,
+        num_times: int,
         lens: Tensor | None = None
     ):
         batch, device = control_points.shape[0], control_points.device
@@ -74,16 +74,14 @@ class BSpline(Module):
 
         # uniform times from 0 - 1
 
-        assert exists(num_times) ^ exists(lens)
-
-        if exists(num_times):
-            times = torch.linspace(0, 1, num_times, device = device)
-            times = repeat(times, 't -> b t', b = batch)
-        else:
+        if exists(lens):
             times = torch.arange(num_times, device = device, dtype = torch.float)
-            times /= rearrange(lens - 1, 'b -> b 1')
+            times = rearrange(times, 't -> 1 t') / rearrange(lens - 1, 'b -> b 1')
             times = times.clamp(max = 1.)
             times = rearrange(times, 'b t -> b t')
+        else:
+            times = torch.linspace(0, 1, num_times, device = device)
+            times = repeat(times, 't -> b t', b = batch)
 
         # following https://en.wikipedia.org/wiki/B-spline
         # open an issue if you see some obvious error
@@ -159,10 +157,9 @@ class SplineBasedTransformer(Module):
 
         device = control_points.device
 
-        splined_from_latent_controls = self.bspliner(control_points, num_times)
+        splined_from_latent_controls = self.bspliner(control_points, num_times, lens = lens)
 
-        if exists(lens):
-            assert not exists(mask)
+        if exists(lens) and not exists(mask):
             mask = lens_to_mask(lens, num_times)
 
         if not exists(attn_bias):
@@ -220,7 +217,7 @@ class SplineBasedTransformer(Module):
 
         # reconstruct data from the bottleneck
 
-        recon = self.decode_from_latents(control_points, num_times = num_points, attn_bias = attn_bias, mask = mask)
+        recon = self.decode_from_latents(control_points, num_times = num_points, attn_bias = attn_bias, mask = mask, lens = lens)
 
         if not return_loss:
             if not return_latents:
