@@ -19,6 +19,8 @@ def default(v, d):
     return v if exists(v) else d
 
 def lens_to_mask(lens, max_length):
+    assert (lens >= 2).all()
+
     seq = torch.arange(max_length, device = lens.device)
     return rearrange(lens, 'b -> b 1') < seq
 
@@ -79,7 +81,8 @@ class BSpline(Module):
             times = repeat(times, 't -> b t', b = batch)
         else:
             times = torch.arange(num_times, device = device, dtype = torch.float)
-            times /= rearrange(lens, 'b -> b 1')
+            times /= rearrange(lens - 1, 'b -> b 1')
+            times = times.clamp(max = 1.)
             times = rearrange(times, 'b t -> b t')
 
         # following https://en.wikipedia.org/wiki/B-spline
@@ -152,6 +155,8 @@ class SplineBasedTransformer(Module):
         lens: Tensor | None = None,
         attn_bias = None
     ):
+        assert num_times >= 2
+
         device = control_points.device
 
         splined_from_latent_controls = self.bspliner(control_points, num_times)
