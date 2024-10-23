@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import torch
 from torch import nn, Tensor, tensor
 import torch.nn.functional as F
@@ -15,6 +17,10 @@ def exists(v):
 
 def default(v, d):
     return v if exists(v) else d
+
+def lens_to_mask(lens, max_length):
+    seq = torch.arange(max_length, device = lens.device)
+    return rearrange(lens, 'b -> b 1') < seq
 
 def pack_with_inverse(t, pattern):
     t, packed_shape = pack(t, pattern)
@@ -58,21 +64,30 @@ class BSpline(Module):
     def forward(
         self,
         control_points: Tensor,
-        num_times: int
+        num_times: int | None = None,
+        lens: Tensor | None = None
     ):
         batch, device = control_points.shape[0], control_points.device
         assert control_points.shape[1] == 4
 
         # uniform times from 0 - 1
 
-        times = torch.linspace(0, 1, num_times, device = device)
+        assert exists(num_times) ^ exists(lens)
+
+        if exists(num_times):
+            times = torch.linspace(0, 1, num_times, device = device)
+            times = repeat(times, 't -> b t', b = batch)
+        else:
+            times = torch.arange(num_times, device = device, dtype = torch.float)
+            times /= rearrange(lens, 'b -> b 1')
+            times = rearrange(times, 'b t -> b t')
 
         # following https://en.wikipedia.org/wiki/B-spline
         # open an issue if you see some obvious error
 
         powers = torch.arange(4, device = device).flip(dims = (0,))
 
-        times = repeat(times, 't -> b t 1', b = batch) ** powers
+        times = rearrange(times, '... -> ... 1') ** powers
 
         return times @ self.coeff @ control_points
 
@@ -133,16 +148,22 @@ class SplineBasedTransformer(Module):
         self,
         control_points: Tensor,
         num_times: int,
+        mask: Tensor | None = None,
+        lens: Tensor | None = None,
         attn_bias = None
     ):
         device = control_points.device
 
         splined_from_latent_controls = self.bspliner(control_points, num_times)
 
+        if exists(lens):
+            assert not exists(mask)
+            mask = lens_to_mask(lens, num_times)
+
         if not exists(attn_bias):
             attn_bias = self.alibi(num_times, num_times)
 
-        decoded = self.decoder(splined_from_latent_controls, attn_bias = attn_bias)
+        decoded = self.decoder(splined_from_latent_controls, attn_bias = attn_bias, mask = mask)
 
         recon = self.mlp_out(decoded)
         return recon
@@ -150,12 +171,19 @@ class SplineBasedTransformer(Module):
     def forward(
         self,
         data: Tensor,
+        lens: Tensor | None = None,
         return_loss = False,
         return_latents = False
     ):
         batch, num_points, device = *data.shape[:2], data.device
 
         data = self.mlp_in(data)
+
+        # mask
+
+        mask = None
+        if exists(lens):
+            mask = lens_to_mask(lens, num_points)
 
         # prepare control point latents across all batch samples
 
@@ -168,9 +196,16 @@ class SplineBasedTransformer(Module):
         attn_bias = self.alibi(num_points, num_points)
         encoder_attn_bias = F.pad(attn_bias, (self.num_control_points, 0, self.num_control_points, 0), value = 0.) # there is no relative distance between the latents and all the data points
 
+        # adjust mask for control points
+
+        mask_with_latents = mask
+
+        if exists(mask_with_latents):
+            mask_with_latents = F.pad(mask_with_latents, (self.num_control_points, 0), value = True)
+
         # encode
 
-        encoded = self.encoder(encoder_input, attn_bias = encoder_attn_bias)
+        encoded = self.encoder(encoder_input, attn_bias = encoder_attn_bias, mask = mask_with_latents)
 
         # splice out control latents
 
@@ -180,7 +215,7 @@ class SplineBasedTransformer(Module):
 
         # reconstruct data from the bottleneck
 
-        recon = self.decode_from_latents(control_points, num_times = num_points, attn_bias = attn_bias)
+        recon = self.decode_from_latents(control_points, num_times = num_points, attn_bias = attn_bias, mask = mask)
 
         if not return_loss:
             if not return_latents:
