@@ -105,15 +105,21 @@ class SplineBasedTransformer(Module):
         heads = 8,
         dropout = 0.,
         num_control_points = 4,
-        encoder_kwargs: dict = dict(),
-        decoder_kwargs: dict = dict(),
+        encoder_kwargs: dict | None = None,
+        decoder_kwargs: dict | None = None,
     ):
         super().__init__()
+
+        if encoder_kwargs is None:
+            encoder_kwargs = {}
+        if decoder_kwargs is None:
+            decoder_kwargs = {}
+
         model_dim = default(model_dim, dim)
         dec_depth = default(dec_depth, enc_depth)
 
         self.num_control_points = num_control_points
-        self.control_point_latents = nn.Parameter(torch.zeros(num_control_points, dim))
+        self.control_point_latents = nn.Parameter(torch.zeros(num_control_points, model_dim))
 
         self.bspliner = BSpline()
 
@@ -122,7 +128,7 @@ class SplineBasedTransformer(Module):
         self.alibi = AlibiPositionalBias(heads) # todo - figure out if the paper accounted for asymmetric slopes given alibi weakness in non-causal setting
 
         self.encoder = Encoder(
-            dim = dim,
+            dim = model_dim,
             heads = heads,
             depth = enc_depth,
             attn_dim_head = dim_head,
@@ -131,10 +137,10 @@ class SplineBasedTransformer(Module):
             **encoder_kwargs
         )
 
-        self.to_control_points = nn.Linear(dim, dim)
+        self.to_control_points = nn.Linear(model_dim, model_dim)
 
         self.decoder = Encoder(
-            dim = dim,
+            dim = model_dim,
             heads = heads,
             depth = dec_depth,
             attn_dim_head = dim_head,
@@ -179,7 +185,7 @@ class SplineBasedTransformer(Module):
     ):
         batch, num_points, device = *data.shape[:2], data.device
 
-        data = self.mlp_in(data)
+        x = self.mlp_in(data)
 
         # mask
 
@@ -191,7 +197,7 @@ class SplineBasedTransformer(Module):
 
         latents = repeat(self.control_point_latents, 'l d -> b l d', b = batch)
 
-        encoder_input, unpack_fn = pack_with_inverse([latents, data], 'b * d')
+        encoder_input, unpack_fn = pack_with_inverse([latents, x], 'b * d')
 
         # prepare alibi attention bias, but encoder is a bit different, as there should be no relative distance to the control latents
 
