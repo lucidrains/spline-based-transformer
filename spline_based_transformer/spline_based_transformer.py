@@ -22,7 +22,7 @@ def lens_to_mask(lens, max_length):
     assert (lens >= 2).all()
 
     seq = torch.arange(max_length, device = lens.device)
-    return rearrange(lens, 'b -> b 1') < seq
+    return rearrange(lens, 'b -> b 1') > seq
 
 def pack_with_inverse(t, pattern):
     t, packed_shape = pack(t, pattern)
