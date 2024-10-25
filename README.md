@@ -1,6 +1,6 @@
 <img src="./spline-based-transformer.png" width="400px"></img>
 
-## Spline-Based Transformer (wip)
+## Spline-Based Transformer
 
 Implementation of the proposed <a href="https://www.youtube.com/watch?v=AzolLlIbKhg">Spline-Based Transformer</a> ([paper](https://la.disneyresearch.com/wp-content/uploads/SBT.pdf)) from Disney Research
 
