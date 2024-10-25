@@ -110,10 +110,8 @@ class SplineBasedTransformer(Module):
     ):
         super().__init__()
 
-        if encoder_kwargs is None:
-            encoder_kwargs = {}
-        if decoder_kwargs is None:
-            decoder_kwargs = {}
+        encoder_kwargs = default(encoder_kwargs, {})
+        decoder_kwargs = default(decoder_kwargs, {})
 
         model_dim = default(model_dim, dim)
         dec_depth = default(dec_depth, enc_depth)
