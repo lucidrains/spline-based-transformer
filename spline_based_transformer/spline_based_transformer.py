@@ -1,11 +1,14 @@
 from __future__ import annotations
+import math
 
 import torch
 from torch import nn, Tensor, tensor
 import torch.nn.functional as F
 from torch.nn import Module, ModuleList
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 from einops import rearrange, repeat, pack, unpack
+from einops.layers.torch import Rearrange
 
 from x_transformers import Encoder
 from x_transformers.x_transformers import AlibiPositionalBias
@@ -17,6 +20,9 @@ def exists(v):
 
 def default(v, d):
     return v if exists(v) else d
+
+def divisible_by(num, den):
+    return (num % den) == 0
 
 def lens_to_mask(lens, max_length):
     assert (lens >= 2).all()
@@ -105,10 +111,12 @@ class SplineBasedTransformer(Module):
         heads = 8,
         dropout = 0.,
         num_control_points = 4,
+        always_mlp_project = False,
         encoder_kwargs: dict | None = None,
         decoder_kwargs: dict | None = None,
     ):
         super().__init__()
+        self.dim = dim
 
         encoder_kwargs = default(encoder_kwargs, {})
         decoder_kwargs = default(decoder_kwargs, {})
@@ -121,7 +129,7 @@ class SplineBasedTransformer(Module):
 
         self.bspliner = BSpline()
 
-        self.mlp_in = MLP(dim, model_dim)
+        self.mlp_in = MLP(dim, model_dim) if always_mlp_project or dim != model_dim else nn.Identity()
 
         self.alibi = AlibiPositionalBias(heads) # todo - figure out if the paper accounted for asymmetric slopes given alibi weakness in non-causal setting
 
@@ -147,7 +155,7 @@ class SplineBasedTransformer(Module):
             **decoder_kwargs
         )
 
-        self.mlp_out = MLP(model_dim, dim)
+        self.mlp_out = MLP(model_dim, dim) if always_mlp_project or dim != model_dim else nn.Identity()
 
     def decode_from_latents(
         self,
@@ -231,3 +239,70 @@ class SplineBasedTransformer(Module):
 
         recon_loss = F.mse_loss(recon, data)
         return recon_loss
+
+# image autoencoder wrapper
+
+class ImageAutoencoderWrapper(Module):
+    def __init__(
+        self,
+        image_size,
+        patch_size,
+        spline_transformer: SplineBasedTransformer,
+        channels = 3,
+    ):
+        super().__init__()
+        assert divisible_by(image_size, patch_size)
+
+        self.num_times = (image_size // patch_size) ** 2
+
+        image_patch_dim = channels * patch_size ** 2
+
+        dim = spline_transformer.dim
+
+        self.patch_to_tokens = nn.Sequential(
+            Rearrange('b c (h p1) (w p2) -> b h w (p1 p2 c)', p1 = patch_size, p2 = patch_size),
+            nn.Linear(image_patch_dim, dim)
+        )
+
+        self.spline_transformer = spline_transformer
+
+        self.tokens_to_patch = nn.Sequential(
+            nn.Linear(dim, image_patch_dim),
+            Rearrange('b h w (p1 p2 c) -> b c (h p1) (w p2)', p1 = patch_size, p2 = patch_size),
+        )
+
+    def decode_from_latents(
+        self,
+        control_points: Tensor,
+    ):
+        recon_tokens = self.spline_transformer.decode_from_latents(control_points, self.num_times)
+
+        seq_len = recon_tokens.shape[-2]
+        recon_tokens = rearrange(recon_tokens, 'b (h w) d -> b h w d', h = int(math.sqrt(seq_len)))
+
+        recon_images = self.tokens_to_patch(recon_tokens)
+        return recon_images
+
+    def forward(
+        self,
+        images: Tensor,
+        return_loss = False,
+        return_latents = False
+    ):
+
+        tokens = self.patch_to_tokens(images)
+        tokens, inverse_pack = pack_with_inverse([tokens], 'b * d')
+
+        out = self.spline_transformer(tokens, return_loss = return_loss, return_latents = return_latents)
+
+        if return_loss:
+            return out
+
+        (recon_tokens, *rest), tree_spec = tree_flatten(out)
+
+        recon_tokens, = inverse_pack(recon_tokens)
+
+        recon_images = self.tokens_to_patch(recon_tokens)
+
+        output = tree_unflatten((recon_images, *rest), tree_spec)
+        return output
